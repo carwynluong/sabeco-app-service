@@ -1,6 +1,14 @@
+require('dotenv').config();
 const express = require("express");
 const path = require("path");
 const { connectToDb, getTables, getStudents, addStudent } = require("./db");
+const { 
+    testConnection, 
+    listContainers, 
+    listBlobs, 
+    uploadBlob, 
+    deleteBlob 
+} = require("./storage");
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -17,30 +25,6 @@ app.get("/", (req, res) => {
 // Health check endpoint for Azure
 app.get("/health", (req, res) => {
     res.status(200).json({ status: "OK", timestamp: new Date().toISOString() });
-});
-
-// Environment variables check endpoint
-app.get("/api/config", (req, res) => {
-    try {
-        console.log("API call: /api/config");
-        const config = {
-            user: process.env.USER || "NOT SET",
-            password: process.env.PASSWORD ? "***HIDDEN***" : "NOT SET",
-            server: process.env.SERVER || "NOT SET",
-            database: process.env.DATABASE || "NOT SET",
-            port: process.env.PORT || "3000",
-            nodeEnv: process.env.NODE_ENV || "NOT SET",
-        };
-
-        console.log("Environment config:", config);
-        res.json(config);
-    } catch (err) {
-        console.error("API Error /api/config:", err.message);
-        res.status(500).json({
-            error: "Internal server error",
-            details: err.message,
-        });
-    }
 });
 
 app.get("/api/tables", async (req, res) => {
@@ -133,6 +117,93 @@ app.post("/api/students", async (req, res) => {
         }
     } catch (err) {
         console.error("API Error POST /api/students:", err.message);
+        res.status(500).json({
+            error: "Internal server error",
+            details: err.message,
+        });
+    }
+});
+
+// Azure Blob Storage endpoints
+app.get("/api/storage/test", async (req, res) => {
+    try {
+        console.log("API call: /api/storage/test");
+        const result = await testConnection();
+        
+        if (result.success) {
+            res.json({
+                success: true,
+                message: "Azure Storage connection successful",
+                accountInfo: result.accountInfo
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: result.error,
+                details: "Failed to connect to Azure Storage"
+            });
+        }
+    } catch (err) {
+        console.error("API Error /api/storage/test:", err.message);
+        res.status(500).json({
+            success: false,
+            error: "Internal server error",
+            details: err.message,
+        });
+    }
+});
+
+app.get("/api/storage/containers", async (req, res) => {
+    try {
+        console.log("API call: /api/storage/containers");
+        const containers = await listContainers();
+        res.json(containers);
+    } catch (err) {
+        console.error("API Error /api/storage/containers:", err.message);
+        res.status(500).json({
+            error: "Failed to list containers",
+            details: err.message,
+        });
+    }
+});
+
+app.get("/api/storage/containers/:containerName/blobs", async (req, res) => {
+    try {
+        const { containerName } = req.params;
+        console.log(`API call: /api/storage/containers/${containerName}/blobs`);
+        
+        const blobs = await listBlobs(containerName);
+        res.json(blobs);
+    } catch (err) {
+        console.error("API Error /api/storage/blobs:", err.message);
+        res.status(500).json({
+            error: "Failed to list blobs",
+            details: err.message,
+        });
+    }
+});
+
+
+app.delete("/api/storage/containers/:containerName/blobs/:blobName", async (req, res) => {
+    try {
+        const { containerName, blobName } = req.params;
+        console.log(`API call: DELETE /api/storage/containers/${containerName}/blobs/${blobName}`);
+        
+        const result = await deleteBlob(containerName, blobName);
+        if (result.success) {
+            res.json({
+                success: true,
+                message: "Blob deleted successfully"
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: result.error,
+                details: "Failed to delete blob"
+            });
+        }
+    } catch (err) {
+        console.error("API Error DELETE /api/storage/blobs:", err.message);
         res.status(500).json({
             error: "Internal server error",
             details: err.message,

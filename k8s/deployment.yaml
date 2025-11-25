@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sabeco-app-deployment
+  labels:
+    app: sabeco-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sabeco-app
+  template:
+    metadata:
+      labels:
+        app: sabeco-app
+    spec:
+      containers:
+      - name: sabeco-app
+        image: your-acr-name.azurecr.io/sabeco-app-service:latest  # Update with your ACR
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: CUSTOMCONNSTR_USER
+          valueFrom:
+            secretKeyRef:
+              name: sabeco-app-secrets
+              key: CUSTOMCONNSTR_USER
+        - name: CUSTOMCONNSTR_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sabeco-app-secrets
+              key: CUSTOMCONNSTR_PASSWORD
+        - name: CUSTOMCONNSTR_SERVER
+          valueFrom:
+            secretKeyRef:
+              name: sabeco-app-secrets
+              key: CUSTOMCONNSTR_SERVER
+        - name: CUSTOMCONNSTR_DATABASE
+          valueFrom:
+            secretKeyRef:
+              name: sabeco-app-secrets
+              key: CUSTOMCONNSTR_DATABASE
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+      imagePullSecrets:
+      - name: acr-secret  # Create this secret for ACR access

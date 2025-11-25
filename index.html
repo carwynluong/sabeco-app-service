@@ -203,8 +203,8 @@
                 <button class="tab" onclick="showTab('students')">
                     Quản lý Học sinh
                 </button>
-                <button class="tab" onclick="showTab('config')">
-                    Environment Config
+                <button class="tab" onclick="showTab('storage')">
+                    Azure Blob Storage
                 </button>
             </div>
 
@@ -290,38 +290,73 @@
                 </button>
             </div>
 
-            <div id="configContent" class="tab-content">
-                <h3>Environment Configuration Check</h3>
-                <p>
-                    Kiểm tra các biến môi trường được sử dụng để kết nối
-                    database:
-                </p>
-
-                <div id="configStatus" class="status">
-                    <div class="loading">Đang tải cấu hình...</div>
+            <div id="storageContent" class="tab-content">
+                <h3>Azure Blob Storage Management</h3>
+                
+                <!-- Connection Test -->
+                <div style="margin-bottom: 20px;">
+                    <button class="refresh-btn" onclick="testStorageConnection()">
+                        Test Azure Storage Connection
+                    </button>
+                    <div id="storageConnectionStatus" style="margin-top: 10px;"></div>
                 </div>
 
-                <div id="configInfo" style="display: none">
-                    <table class="students-table">
-                        <thead>
-                            <tr>
-                                <th>Environment Variable</th>
-                                <th>Value</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="configTableBody"></tbody>
-                    </table>
+                <!-- Container Management -->
+                <div style="margin-bottom: 30px;">
+                    <h4>Containers</h4>
+                    
+                    <div id="containerStatus" class="status">
+                        <div class="loading">Click "Load Containers" to view containers</div>
+                    </div>
+                    
+                    <div id="containersList" style="display: none;">
+                        <table class="students-table">
+                            <thead>
+                                <tr>
+                                    <th>Container Name</th>
+                                    <th>Public Access</th>
+                                    <th>Last Modified</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="containersTableBody"></tbody>
+                        </table>
+                    </div>
+                    
+                    <button class="refresh-btn" onclick="loadContainers()">
+                        Load Containers
+                    </button>
                 </div>
 
-                <button
-                    id="refreshConfigBtn"
-                    class="refresh-btn"
-                    onclick="loadConfig()"
-                >
-                    Làm mới Config
-                </button>
+                <!-- Blob Management -->
+                <div id="blobManagement" style="display: none;">
+                    <h4>Blobs in Container: <span id="selectedContainer"></span></h4>
+                    
+                    <div id="blobStatus" class="status">
+                        <div class="loading">Loading blobs...</div>
+                    </div>
+                    
+                    <div id="blobsList" style="display: none;">
+                        <table class="students-table">
+                            <thead>
+                                <tr>
+                                    <th>Blob Name</th>
+                                    <th>Size</th>
+                                    <th>Content Type</th>
+                                    <th>Last Modified</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="blobsTableBody"></tbody>
+                        </table>
+                    </div>
+                    
+                    <button class="refresh-btn" onclick="goBackToContainers()">
+                        ← Back to Containers
+                    </button>
+                </div>
             </div>
+
         </div>
 
         <script>
@@ -353,14 +388,13 @@
                         .querySelectorAll(".tab")[1]
                         .classList.add("active");
                     loadStudents();
-                } else if (tabName === "config") {
+                } else if (tabName === "storage") {
                     document
-                        .getElementById("configContent")
+                        .getElementById("storageContent")
                         .classList.add("active");
                     document
                         .querySelectorAll(".tab")[2]
                         .classList.add("active");
-                    loadConfig();
                 }
             }
             async function loadTables() {
@@ -449,10 +483,10 @@
                     data.forEach((student) => {
                         const row = document.createElement("tr");
                         row.innerHTML = `
-                            <td>${student.Id}</td>
-                            <td>${student.Name || "N/A"}</td>
-                            <td>${student.Age || "N/A"}</td>
-                            <td>${student.City || "N/A"}</td>
+                            <td>${student.id}</td>
+                            <td>${student.name || "N/A"}</td>
+                            <td>${student.age || "N/A"}</td>
+                            <td>${student.city || "N/A"}</td>
                         `;
                         tbody.appendChild(row);
                     });
@@ -507,100 +541,150 @@
                 }
             }
 
-            async function loadConfig() {
-                const statusDiv = document.getElementById("configStatus");
-                const configInfo = document.getElementById("configInfo");
-                const tbody = document.getElementById("configTableBody");
-
-                statusDiv.innerHTML =
-                    '<div class="loading">Đang tải cấu hình...</div>';
-                configInfo.style.display = "none";
-                tbody.innerHTML = "";
-
+            // Azure Blob Storage Functions
+            async function testStorageConnection() {
+                const statusDiv = document.getElementById("storageConnectionStatus");
+                statusDiv.innerHTML = '<div class="loading">Testing connection...</div>';
+                
                 try {
-                    console.log("Fetching config from API...");
-                    const response = await fetch("/api/config");
+                    const response = await fetch("/api/storage/test");
                     const data = await response.json();
-
-                    console.log("Config API Response:", {
-                        status: response.status,
-                        data,
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(
-                            data.details
-                                ? `${data.error}: ${data.details}`
-                                : data.error || "Có lỗi xảy ra"
-                        );
+                    
+                    if (response.ok && data.success) {
+                        statusDiv.innerHTML = '<div style="color: #28a745;">✅ Azure Storage connection successful!</div>';
+                    } else {
+                        statusDiv.innerHTML = `<div class="error">❌ Connection failed: ${data.error || data.details}</div>`;
                     }
+                } catch (error) {
+                    console.error("Error testing storage connection:", error);
+                    statusDiv.innerHTML = `<div class="error">❌ Connection error: ${error.message}</div>`;
+                }
+            }
 
-                    statusDiv.innerHTML =
-                        '<div style="color: #28a745;">Cấu hình đã được tải thành công.</div>';
-                    configInfo.style.display = "block";
-
-                    // Create table rows for each config item
-                    const configItems = [
-                        {
-                            key: "USER",
-                            value: data.user,
-                            description: "Database Username",
-                        },
-                        {
-                            key: "PASSWORD",
-                            value: data.password,
-                            description: "Database Password",
-                        },
-                        {
-                            key: "SERVER",
-                            value: data.server,
-                            description: "Database Server",
-                        },
-                        {
-                            key: "DATABASE",
-                            value: data.database,
-                            description: "Database Name",
-                        },
-                        {
-                            key: "PORT",
-                            value: data.port,
-                            description: "Application Port",
-                        },
-                        {
-                            key: "NODE_ENV",
-                            value: data.nodeEnv,
-                            description: "Node Environment",
-                        },
-                    ];
-
-                    configItems.forEach((item) => {
+            async function loadContainers() {
+                const statusDiv = document.getElementById("containerStatus");
+                const containersList = document.getElementById("containersList");
+                const tbody = document.getElementById("containersTableBody");
+                
+                statusDiv.innerHTML = '<div class="loading">Loading containers...</div>';
+                containersList.style.display = "none";
+                tbody.innerHTML = "";
+                
+                try {
+                    const response = await fetch("/api/storage/containers");
+                    const containers = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(containers.details || containers.error || "Failed to load containers");
+                    }
+                    
+                    statusDiv.innerHTML = `<div style="color: #28a745;">Found ${containers.length} containers</div>`;
+                    containersList.style.display = "block";
+                    
+                    containers.forEach(container => {
                         const row = document.createElement("tr");
-                        const isSet = item.value && item.value !== "NOT SET";
-                        const statusText = isSet ? "✅ SET" : "❌ NOT SET";
-                        const statusColor = isSet ? "#28a745" : "#dc3545";
-
                         row.innerHTML = `
-                            <td><strong>${item.key}</strong><br><small>${
-                            item.description
-                        }</small></td>
-                            <td><code>${item.value || "undefined"}</code></td>
-                            <td style="color: ${statusColor}; font-weight: bold;">${statusText}</td>
+                            <td><strong>${container.name}</strong></td>
+                            <td>${container.publicAccess}</td>
+                            <td>${new Date(container.lastModified).toLocaleString()}</td>
+                            <td>
+                                <button class="refresh-btn" style="padding: 5px 10px; font-size: 12px;" 
+                                        onclick="viewBlobs('${container.name}')">
+                                    View Blobs
+                                </button>
+                            </td>
                         `;
                         tbody.appendChild(row);
                     });
-
-                    // Show summary
-                    const notSetCount = configItems.filter(
-                        (item) => !item.value || item.value === "NOT SET"
-                    ).length;
-                    if (notSetCount > 0) {
-                        statusDiv.innerHTML += `<div style="color: #dc3545; margin-top: 10px;">⚠️ ${notSetCount} biến môi trường chưa được thiết lập!</div>`;
-                    }
+                    
                 } catch (error) {
-                    console.error("Error loading config:", error);
-                    statusDiv.innerHTML = `<div class="error">Lỗi tải cấu hình: ${error.message}</div>`;
+                    console.error("Error loading containers:", error);
+                    statusDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
                 }
             }
+
+
+            async function viewBlobs(containerName) {
+                document.getElementById("selectedContainer").textContent = containerName;
+                document.getElementById("containersList").parentNode.style.display = "none";
+                document.getElementById("blobManagement").style.display = "block";
+                
+                const statusDiv = document.getElementById("blobStatus");
+                const blobsList = document.getElementById("blobsList");
+                const tbody = document.getElementById("blobsTableBody");
+                
+                statusDiv.innerHTML = '<div class="loading">Loading blobs...</div>';
+                blobsList.style.display = "none";
+                tbody.innerHTML = "";
+                
+                try {
+                    const response = await fetch(`/api/storage/containers/${containerName}/blobs`);
+                    const blobs = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(blobs.details || blobs.error || "Failed to load blobs");
+                    }
+                    
+                    statusDiv.innerHTML = `<div style="color: #28a745;">Found ${blobs.length} blobs</div>`;
+                    blobsList.style.display = "block";
+                    
+                    if (blobs.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">No blobs found in this container</td></tr>';
+                    } else {
+                        blobs.forEach(blob => {
+                            const row = document.createElement("tr");
+                            const sizeInKB = (blob.size / 1024).toFixed(2);
+                            row.innerHTML = `
+                                <td>${blob.name}</td>
+                                <td>${sizeInKB} KB</td>
+                                <td>${blob.contentType || 'N/A'}</td>
+                                <td>${new Date(blob.lastModified).toLocaleString()}</td>
+                                <td>
+                                    <button class="refresh-btn" style="padding: 3px 8px; font-size: 11px; background-color: #dc3545;" 
+                                            onclick="deleteBlob('${containerName}', '${blob.name}')">
+                                        Delete
+                                    </button>
+                                </td>
+                            `;
+                            tbody.appendChild(row);
+                        });
+                    }
+                    
+                } catch (error) {
+                    console.error("Error loading blobs:", error);
+                    statusDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                }
+            }
+
+            async function deleteBlob(containerName, blobName) {
+                if (!confirm(`Are you sure you want to delete blob "${blobName}"?`)) {
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`/api/storage/containers/${containerName}/blobs/${encodeURIComponent(blobName)}`, {
+                        method: "DELETE"
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok && data.success) {
+                        alert("Blob deleted successfully!");
+                        viewBlobs(containerName); // Refresh the list
+                    } else {
+                        alert(`Failed to delete blob: ${data.error || data.details}`);
+                    }
+                } catch (error) {
+                    console.error("Error deleting blob:", error);
+                    alert(`Error deleting blob: ${error.message}`);
+                }
+            }
+
+            function goBackToContainers() {
+                document.getElementById("blobManagement").style.display = "none";
+                document.getElementById("containersList").parentNode.style.display = "block";
+            }
+
 
             // Event listeners
             document

@@ -1,37 +1,37 @@
-const sql = require("mssql");
+const { Pool } = require("pg");
 
 const config = {
-    user: process.env.CUSTOMCONNSTR_USER,
-    password: process.env.CUSTOMCONNSTR_PASSWORD,
-    server: process.env.CUSTOMCONNSTR_SERVER,
-    database: process.env.CUSTOMCONNSTR_DATABASE,
-    pool: {
-        max: 10,
-        min: 0,
-        idleTimeoutMillis: 30000,
-    },
-    options: {
-        encrypt: true,
-        trustServerCertificate: false,
-        enableArithAbort: true,
-    },
-    connectionTimeout: 60000,
-    requestTimeout: 60000,
+    host: process.env.POSTGRES_HOST,
+    port: process.env.POSTGRES_PORT || 5432,
+    database: process.env.POSTGRES_DB || 'postgres',
+    user: process.env.POSTGRES_USER,
+    password: process.env.POSTGRES_PASSWORD,
+    ssl: process.env.DB_SSL === 'true' ? { 
+        rejectUnauthorized: false 
+    } : false,
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 60000,
+    acquireTimeoutMillis: 60000,
 };
 
-let poolPromise;
+let pool;
 
 async function getConnection() {
     try {
-        if (!poolPromise) {
-            poolPromise = sql.connect(config);
+        if (!pool) {
+            pool = new Pool(config);
+            
+            // Test connection
+            const client = await pool.connect();
+            console.log("Database connection established");
+            client.release();
         }
-        const pool = await poolPromise;
-        console.log("Database connection established");
         return pool;
     } catch (err) {
         console.error("Database connection failed:", err);
-        poolPromise = null; // Reset on failure
+        pool = null; // Reset on failure
         throw err;
     }
 }
@@ -42,6 +42,7 @@ async function connectToDb() {
         return true;
     } catch (err) {
         console.error("Database connection test failed:", err.message);
+        console.log("Database connection test failed");
         return false;
     }
 }
@@ -50,11 +51,14 @@ async function getTables() {
     try {
         console.log("Getting tables from database...");
         const pool = await getConnection();
-        const result = await pool
-            .request()
-            .query("SELECT name FROM sys.tables ORDER BY name");
-        console.log(`Found ${result.recordset.length} tables`);
-        return result.recordset;
+        const result = await pool.query(`
+            SELECT tablename as name 
+            FROM pg_tables 
+            WHERE schemaname = 'public' 
+            ORDER BY tablename
+        `);
+        console.log(`Found ${result.rows.length} tables`);
+        return result.rows;
     } catch (err) {
         console.error("Error getting tables:", err.message);
         throw new Error(`Database query failed: ${err.message}`);
@@ -67,31 +71,62 @@ async function getStudents() {
         const pool = await getConnection();
 
         // First check if table exists
-        const tableCheck = await pool.request().query(`
+        const tableCheck = await pool.query(`
             SELECT COUNT(*) as count 
-            FROM INFORMATION_SCHEMA.TABLES 
-            WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'Students'
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_name = 'students'
         `);
 
-        if (tableCheck.recordset[0].count === 0) {
+        if (parseInt(tableCheck.rows[0].count) === 0) {
             console.log("Students table does not exist, creating it...");
-            await pool.request().query(`
-                CREATE TABLE dbo.Students (
-                    Id INT IDENTITY(1,1) PRIMARY KEY,
-                    Name NVARCHAR(100),
-                    Age INT,
-                    City NVARCHAR(100)
+            await pool.query(`
+                CREATE TABLE students (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(100),
+                    age INTEGER,
+                    city VARCHAR(100)
                 )
             `);
             console.log("Students table created successfully");
-            return [];
+            
+            // Add sample data
+            await pool.query(`
+                INSERT INTO students (name, age, city) VALUES 
+                ('Nguyễn Văn An', 22, 'Hà Nội'),
+                ('Trần Thị Bình', 21, 'Hồ Chí Minh'),
+                ('Lê Văn Cường', 23, 'Đà Nẵng'),
+                ('Phạm Thị Dung', 20, 'Hải Phòng'),
+                ('Hoàng Văn Em', 24, 'Cần Thơ')
+            `);
+            console.log("Sample data inserted");
         }
 
-        const result = await pool
-            .request()
-            .query("SELECT Id, Name, Age, City FROM dbo.Students ORDER BY Id");
-        console.log(`Found ${result.recordset.length} students`);
-        return result.recordset;
+        const result = await pool.query(
+            "SELECT id, name, age, city FROM students ORDER BY id"
+        );
+        console.log(`Found ${result.rows.length} students`);
+        
+        // If table exists but is empty, add sample data
+        if (result.rows.length === 0) {
+            console.log("Table is empty, adding sample data...");
+            await pool.query(`
+                INSERT INTO students (name, age, city) VALUES 
+                ('Nguyễn Văn An', 22, 'Hà Nội'),
+                ('Trần Thị Bình', 21, 'Hồ Chí Minh'),
+                ('Lê Văn Cường', 23, 'Đà Nẵng'),
+                ('Phạm Thị Dung', 20, 'Hải Phòng'),
+                ('Hoàng Văn Em', 24, 'Cần Thơ')
+            `);
+            console.log("Sample data inserted");
+            
+            // Re-fetch data
+            const newResult = await pool.query(
+                "SELECT id, name, age, city FROM students ORDER BY id"
+            );
+            return newResult.rows;
+        }
+        
+        return result.rows;
     } catch (err) {
         console.error("Error getting students:", err.message);
         throw new Error(`Database query failed: ${err.message}`);
@@ -102,18 +137,15 @@ async function addStudent(name, age, city) {
     try {
         console.log(`Adding student: ${name}, ${age}, ${city}`);
         const pool = await getConnection();
-        const request = pool.request();
-        request.input("name", sql.NVarChar(100), name);
-        request.input("age", sql.Int, age);
-        request.input("city", sql.NVarChar(100), city);
-
-        const result = await request.query(
-            "INSERT INTO dbo.Students (Name, Age, City) VALUES (@name, @age, @city); SELECT SCOPE_IDENTITY() as Id"
+        
+        const result = await pool.query(
+            "INSERT INTO students (name, age, city) VALUES ($1, $2, $3) RETURNING id",
+            [name, age, city]
         );
         console.log(
-            `Student added successfully with ID: ${result.recordset[0].Id}`
+            `Student added successfully with ID: ${result.rows[0].id}`
         );
-        return { success: true, id: result.recordset[0].Id };
+        return { success: true, id: result.rows[0].id };
     } catch (err) {
         console.error("Error adding student:", err.message);
         return { success: false, error: err.message };
@@ -123,8 +155,10 @@ async function addStudent(name, age, city) {
 // Graceful shutdown
 process.on("SIGINT", async () => {
     try {
-        await sql.close();
-        console.log("Database connection closed.");
+        if (pool) {
+            await pool.end();
+            console.log("Database connection closed.");
+        }
     } catch (err) {
         console.error("Error closing database connection:", err);
     }
